@@ -11,7 +11,7 @@ dependencies:
   - python>=3.8
   - pip
   - mamba # esp for windows build
-  - streamlit
+  - streamlit>=1.24
   - pyyaml
   - numpy
   - pandas
@@ -23,7 +23,7 @@ dependencies:
   - networkx
   - holoviews
   - panel
-  - geoviews
+  - geoviews>=1.8
   - cartopy
   - pyproj
   - scipy
