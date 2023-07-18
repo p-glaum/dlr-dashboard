@@ -1,0 +1,31 @@
+
+# SPDX-FileCopyrightText: : 2017-2020 The PyPSA-Eur Authors
+#
+# SPDX-License-Identifier: MIT
+name: streamlit
+channels:
+  - conda-forge
+  - bioconda
+  - http://conda.anaconda.org/gurobi
+dependencies:
+  - python>=3.8
+  - pip
+  - mamba # esp for windows build
+  - streamlit
+  - pyyaml
+  - numpy
+  - pandas
+  - matplotlib
+  - plotly
+  - bokeh==2.4.3
+  - hvplot
+  - geopandas
+  - networkx
+  - holoviews
+  - panel
+  - geoviews
+  - cartopy
+  - pyproj
+  - scipy
+  - xarray
+  - netcdf4
