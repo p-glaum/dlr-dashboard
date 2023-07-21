@@ -29,3 +29,5 @@ dependencies:
   - scipy
   - xarray
   - netcdf4
+  - pypsa
+  - jupyter_bokeh
