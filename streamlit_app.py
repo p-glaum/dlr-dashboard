@@ -4,7 +4,7 @@ import numpy as np
 import xarray as xr
 import yaml
 import plotly.graph_objects as go
-from matplotlib.colors import to_rgba
+from matplotlib.colors import LinearSegmentedColormap, hex2color
 from contextlib import suppress
 from bokeh.models import HoverTool
 import geopandas as gpd
@@ -34,10 +34,10 @@ def load_regions():
 
 
 @st.cache_data(persist=True)
-def load_country_shape():
-    fn = "data/country_shapes.geojson"
+def load_shape(fn):
     gdf = gpd.read_file(fn)
     gdf.geometry = gdf.to_crs(3035).geometry.simplify(1000).to_crs(4326)
+    gdf.set_index("name", inplace=True)
     return gdf
 
 
@@ -124,11 +124,15 @@ with st.sidebar:
     dlr_rating_options = [100, 130, 150, 180, 200, "unlimited"]
     scenario_list = ["year 2019"] + \
         [f"{x}% renewable share" for x in range(80, 105, 5)]
+    tech_list = ["Onshore Wind", "Solar",
+                 "Offshore Wind (AC)", "Offshore Wind (DC)"]
     barplot_parameters = ["optimal capacities",
                           "generation", "curtailment", "cost"]
 
 
 networks = pd.Series(open_networks())
+regions_shapes = load_shape("data/regions_onshore_elec_s_all.geojson")
+country_shape = load_shape("data/country_shapes.geojson")
 
 if (display == "Map explorer"):
 
@@ -144,6 +148,9 @@ if (display == "Map explorer"):
         custom_settings["scenario"] = st.selectbox(
             "Scenario", scenario_list, help="Choose scenario.")
 
+    custom_settings["tech"] = st.selectbox(
+        "Technology", tech_list, help="Choose technology.")
+
     n = networks.filter(regex=network_selector(
         custom_settings["scenario"], custom_settings["dlr_rating"]))
 
@@ -153,20 +160,31 @@ if (display == "Map explorer"):
     else:
         n = n.iloc[0]
 
-        county_shape = load_country_shape().drop("name", axis=1)
-
         opts = dict(
-            active_tools=['wheel_zoom']
+            xaxis=None,
+            yaxis=None,
+            active_tools=['pan']
         )
         crs = "4326"
 
-        # plot german shapefile
-        plot = county_shape.hvplot(
-            geo=True,
-            color='white',
+        carrier = n.carriers[n.carriers.nice_name ==
+                             custom_settings["tech"]].squeeze()
+        capacities = n.statistics.optimal_capacity(comps=["Generator"], groupby=[
+                                                   "carrier", "bus"]).droplevel(0)
+        cmap = get_cmap(carrier.name)
+
+        regions_shapes[carrier.nice_name] = capacities[carrier.name].div(1e3)
+        regions_shapes[carrier.nice_name] = regions_shapes[carrier.nice_name].fillna(
+            0)
+        plot = regions_shapes.hvplot(
+            height=720,
+            width=600,
+            color=carrier.nice_name,
             alpha=0.7,
             crs=crs,
-            width=400, height=300
+            hover_cols=[carrier.nice_name],
+            cmap=cmap,
+            tiles=config["tiles"],
         ).opts(**opts)
 
         # plot lines
@@ -184,52 +202,22 @@ if (display == "Map explorer"):
             node_size=0,
             edge_color='Total Capacity (GW)',
             inspection_policy="edges",
-            # edge_width=4,
             crs=crs,
         )
 
         plot *= line_plot
 
-        # plot buses
-        # buses = n.buses[["x", "y"]].reset_index()
-        bus_size = n.statistics.optimal_capacity(groupby=n.statistics.get_bus_and_carrier)[
-            "Generator"].drop("load", level=1, errors="ignore")
-        # # buses = buses.merge(bus_size.unstack(), left_index=True,
-        # #                     right_index=True).reset_index()
-        buses = gpd.GeoDataFrame(index=n.buses.index, geometry=gpd.points_from_xy(
-            n.buses.x, n.buses.y), crs=crs).reset_index()
+        st.bokeh_chart(hv.render(plot, backend='bokeh'),
+                       use_container_width=True)
 
-        # node_plot = hv.Scatter(buses, 'x', 'y').opts(
-        #     tools=['tap', 'hover'], size=10,  color="blue", alpha=0.7, hover_color="red")
-        node_plot = buses.hvplot().opts(
-            tools=['tap'], active_tools=['tap'], size=15)
+        rating_plot = (n.lines_t.p0/n.lines.s_nom_opt).abs().mean(
+            axis=1).rename("Rating").hvplot(title="Average Line Rating").opts(active_tools=['pan'])
+        st.bokeh_chart(hv.render(rating_plot, backend='bokeh'),
+                       use_container_width=True)
 
-        plot *= node_plot
-
-        # plot the capacity as hv Barplot
-        def plot_capacity_bar(index):
-            print(index)
-            if not index:
-                return hv.Bars(pd.Series()).relabel("No selection")
-            else:
-                bus = buses.iloc[tap.index[0]]["Bus"]
-                bar_plot = hv.Bars(bus_size[bus].dropna())
-                bar_plot.opts(title=f"Bus {bus}", xlabel="Carrier",
-                              ylabel="Capacity (GW)", width=400, height=300)
-                return bar_plot
-
-        # Define a Stream object to handle the tap event
-        tap = hv.streams.Selection1D('Tap', source=node_plot)
-        tap.param.mode = 'single'
-        # %%
-        # Create a dynamic plot that updates when a point is clicked
-        dynamic_bar = hv.DynamicMap(
-            plot_capacity_bar, streams=[tap])
-
-        # Display the dynamic plot
-        layout = (plot + dynamic_bar).cols(2)
-
-        st.bokeh_chart(hv.render(layout, backend='bokeh'),
+        generation_plot = n.statistics.dispatch(comps=["Generator"], aggregate_time=False).droplevel(
+            0).loc[carrier.nice_name].div(1e3).hvplot(title=f"{carrier.nice_name} Generation in GW").opts(active_tools=['pan'])
+        st.bokeh_chart(hv.render(generation_plot, backend='bokeh'),
                        use_container_width=True)
 
 
@@ -237,8 +225,8 @@ if (display == "Bar plot explorer"):
 
     st.title("Bar plot explorer")
 
-    custom_settings["barplot_parameters"] = st.selectbox(
-        "Parameter", barplot_parameters, help="Choose a parameter you want to plot as bar plot.")
+    # custom_settings["barplot_parameters"] = st.selectbox(
+    #     "Parameter", barplot_parameters, help="Choose a parameter you want to plot as bar plot.")
 
     _, col1, col2, _ = st.columns([1, 50, 50, 1])
 
@@ -256,18 +244,20 @@ if (display == "Bar plot explorer"):
         st.error("No data available for this selection.")
         st.stop()
     n = n.iloc[0]
-    if custom_settings["barplot_parameters"] == "optimal capacities":
-        plot = n.statistics.optimal_capacity().hvplot.bar()
-    elif custom_settings["barplot_parameters"] == "generation":
-        plot = n.statistics.dispatch().hvplot.bar()
-    elif custom_settings["barplot_parameters"] == "curtailment":
-        plot = n.statistics.curtailment().hvplot.bar()
-    elif custom_settings["barplot_parameters"] == "cost":
-        plot = pd.concat([n.statistics.capex(), n.statistics.opex()], axis=1, keys=[
-                         "capex", "opex"]).hvplot.bar()
 
-    st.bokeh_chart(hv.render(plot, backend='bokeh'), use_container_width=True)
+    plots = [(n.statistics.optimal_capacity(), 'Optimal Capacity'),
+             (n.statistics.dispatch(), 'Dispatch'),
+             (n.statistics.curtailment(), 'Curtailment'),
+             (pd.concat([n.statistics.capex(), n.statistics.opex()], axis=1, keys=[
+                 "capex", "opex"]), 'Capex and Opex')]
 
+    # Loop over the plots and create and plot each one
+    for data, title in plots:
+        plot = data.hvplot.bar(title=title, stacked=True,
+                               height=400, width=600).opts(active_tools=['pan'])
+
+        st.bokeh_chart(hv.render(plot, backend='bokeh'),
+                       use_container_width=True)
 
 if (display == "Network comparison"):
 

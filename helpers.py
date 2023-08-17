@@ -55,11 +55,11 @@ def rename_techs(label):
         if rif in label:
             label = rif
 
-    for old,new in rename_if_contains_dict.items():
+    for old, new in rename_if_contains_dict.items():
         if old in label:
             label = new
 
-    for old,new in rename.items():
+    for old, new in rename.items():
         if old == label:
             label = new
     return label
@@ -77,7 +77,7 @@ def rename_techs_tyndp(tech):
     #    return "gas-to-power/heat"
     # elif "solar" in tech:
     #    return "solar"
-    #elif tech == "Fischer-Tropsch":
+    # elif tech == "Fischer-Tropsch":
     #    return "power-to-liquid"
     elif "offshore wind" in tech:
         return "offshore wind"
@@ -122,8 +122,8 @@ def prepare_colors(config):
     colors["process emissions from feedstocks"] = colors["process emissions"]
 
     gas_boilers = ['residential rural gas boiler', 'services rural gas boiler',
-        'residential urban decentral gas boiler',
-        'services urban decentral gas boiler', 'urban central gas boiler']
+                   'residential urban decentral gas boiler',
+                   'services urban decentral gas boiler', 'urban central gas boiler']
     for gas_boiler in gas_boilers:
         colors[gas_boiler] = colors["gas boiler"]
 
@@ -131,8 +131,9 @@ def prepare_colors(config):
     colors["urban central gas CHP CC"] = colors["CHP"]
     colors["urban central solid biomass CHP"] = colors["CHP"]
     colors["urban central solid biomass CHP CC"] = colors["CHP"]
-    
+
     return colors
+
 
 def get_cmap(c):
     if "heat" in c:
@@ -145,5 +146,5 @@ def get_cmap(c):
         return "Purples"
     elif "bio" in c or "battery" in c:
         return "Greens"
-    else: 
+    else:
         return 'Blues'
