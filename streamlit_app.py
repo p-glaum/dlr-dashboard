@@ -53,8 +53,18 @@ def open_networks():
         dlr = file.split("_")[4]
         v = file.split("_")[5]
         n.name = f"{year}-{constraint}-{dlr}-{v}"
+        # to avoid that statistics renames the carriers
+        n.carriers.loc[:, "nice_name"] = ""
         networks[f"{n.name}"] = n
     return networks
+
+
+def get_dlr_options(scenario):
+    if scenario == "year 2019" or scenario == "80% renewable share":
+        dlr_rating_options = [100, 130, 150, 180, 200, "unlimited"]
+    else:
+        dlr_rating_options = [100, "unlimited"]
+    return dlr_rating_options
 
 
 def network_selector(scenario_selection, dlr_selection):
@@ -88,9 +98,7 @@ with open("data/config.yaml", encoding='utf-8') as file:
     config = yaml.safe_load(file)
 
 colors = prepare_colors(config)
-
-preferred_order = pd.Index(config['preferred_order'])
-
+nice_names = pd.Series(config["nice_names"])
 
 # DISPLAY
 
@@ -121,11 +129,10 @@ with st.sidebar:
         "View", view_list, help="Choose your view on the system.")
 
     custom_settings = dict()
-    dlr_rating_options = [100, 130, 150, 180, 200, "unlimited"]
     scenario_list = ["year 2019"] + \
         [f"{x}% renewable share" for x in range(80, 105, 5)]
-    tech_list = ["Onshore Wind", "Solar",
-                 "Offshore Wind (AC)", "Offshore Wind (DC)"]
+    tech_options = {"Onshore Wind": "onwind",
+                    "Solar": "solar", "Offshore Wind": "offwind"}
     barplot_parameters = ["optimal capacities",
                           "generation", "curtailment", "cost"]
 
@@ -141,15 +148,15 @@ if (display == "Map explorer"):
     _, col1, col2, _ = st.columns([1, 50, 50, 1])
 
     with col1:
-        custom_settings["dlr_rating"] = st.select_slider(
-            "DLR Rating", dlr_rating_options, help="Choose dynamic line rating factor.")
-
-    with col2:
         custom_settings["scenario"] = st.selectbox(
             "Scenario", scenario_list, help="Choose scenario.")
 
+    with col2:
+        custom_settings["dlr_rating"] = st.select_slider(
+            "DLR Rating", get_dlr_options(custom_settings["scenario"]), help="Choose dynamic line rating factor.")
+
     custom_settings["tech"] = st.selectbox(
-        "Technology", tech_list, help="Choose technology.")
+        "Technology", list(tech_options.keys()), help="Choose technology.")
 
     n = networks.filter(regex=network_selector(
         custom_settings["scenario"], custom_settings["dlr_rating"]))
@@ -163,28 +170,29 @@ if (display == "Map explorer"):
         opts = dict(
             xaxis=None,
             yaxis=None,
-            active_tools=['pan']
+            active_tools=['pan', 'wheel_zoom'],
         )
         crs = "4326"
 
-        carrier = n.carriers[n.carriers.nice_name ==
-                             custom_settings["tech"]].squeeze()
         capacities = n.statistics.optimal_capacity(comps=["Generator"], groupby=[
                                                    "carrier", "bus"]).droplevel(0)
-        cmap = get_cmap(carrier.name)
+        tech = tech_options[custom_settings["tech"]]
+        capacities = capacities.filter(like=tech).groupby(level=1).sum()
+        cmap = get_cmap(tech)
 
-        regions_shapes[carrier.nice_name] = capacities[carrier.name].div(1e3)
-        regions_shapes[carrier.nice_name] = regions_shapes[carrier.nice_name].fillna(
+        regions_shapes[custom_settings["tech"]] = capacities.div(1e3)
+        regions_shapes[custom_settings["tech"]] = regions_shapes[custom_settings["tech"]].fillna(
             0)
         plot = regions_shapes.hvplot(
             height=720,
             width=600,
-            color=carrier.nice_name,
+            color=custom_settings["tech"],
             alpha=0.7,
             crs=crs,
-            hover_cols=[carrier.nice_name],
+            hover_cols=[custom_settings["tech"]],
             cmap=cmap,
             tiles=config["tiles"],
+            colorbar=True
         ).opts(**opts)
 
         # plot lines
@@ -201,9 +209,12 @@ if (display == "Map explorer"):
             pos=pos,
             node_size=0,
             edge_color='Total Capacity (GW)',
+            edge_cmap="viridis",
+            edge_line_width=5,
             inspection_policy="edges",
             crs=crs,
-        )
+            colorbar=True,
+        ).opts(**opts)
 
         plot *= line_plot
 
@@ -215,8 +226,11 @@ if (display == "Map explorer"):
         st.bokeh_chart(hv.render(rating_plot, backend='bokeh'),
                        use_container_width=True)
 
-        generation_plot = n.statistics.dispatch(comps=["Generator"], aggregate_time=False).droplevel(
-            0).loc[carrier.nice_name].div(1e3).hvplot(title=f"{carrier.nice_name} Generation in GW").opts(active_tools=['pan'])
+        dispatch = n.statistics.dispatch(comps=["Generator"], aggregate_time=False).filter(
+            like=tech, axis=0).groupby(level=0).sum().div(1e3)
+        nice_name = custom_settings["tech"]
+        generation_plot = dispatch.T.hvplot(
+            title=f"{nice_name} Generation in GW").opts(active_tools=['pan'])
         st.bokeh_chart(hv.render(generation_plot, backend='bokeh'),
                        use_container_width=True)
 
@@ -231,12 +245,18 @@ if (display == "Bar plot explorer"):
     _, col1, col2, _ = st.columns([1, 50, 50, 1])
 
     with col1:
-        custom_settings["dlr_rating"] = st.select_slider(
-            "DLR Rating", dlr_rating_options, help="Choose dynamic line rating factor.")
-
-    with col2:
         custom_settings["scenario"] = st.selectbox(
             "Scenario", scenario_list, help="Choose scenario.")
+
+    with col2:
+        custom_settings["dlr_rating"] = st.select_slider(
+            "DLR Rating", get_dlr_options(custom_settings["scenario"]), help="Choose dynamic line rating factor.", label_visibility="visible")
+
+    # tooltips = [
+    #     ('technology', "@carrier"),
+    #     ('value', "@value"),
+    # ]
+    # hover = HoverTool(tooltips=tooltips)
 
     n = networks.filter(regex=network_selector(
         custom_settings["scenario"], custom_settings["dlr_rating"]))
@@ -245,16 +265,28 @@ if (display == "Bar plot explorer"):
         st.stop()
     n = n.iloc[0]
 
-    plots = [(n.statistics.optimal_capacity(), 'Optimal Capacity'),
-             (n.statistics.dispatch(), 'Dispatch'),
-             (n.statistics.curtailment(), 'Curtailment'),
-             (pd.concat([n.statistics.capex(), n.statistics.opex()], axis=1, keys=[
-                 "capex", "opex"]), 'Capex and Opex')]
+    GW_TO_MW = 1e3
+    GWH_TO_MWH = 1e3
+    BN_EUR_TO_EUR = 1e9
+
+    capacity = n.statistics.optimal_capacity(
+        comps=["Generator"]).rename("value")
+    dispatch = n.statistics.dispatch().rename("value")
+    curtailment = n.statistics.curtailment().rename("value")
+    cost = (n.statistics.capex()+n.statistics.opex()
+            ).dropna().rename("value")
+
+    plots = [
+        (capacity, 'Optimal Capacity', "GW", GW_TO_MW),
+        (dispatch, 'Dispatch', "GW", GW_TO_MW),
+        (curtailment, 'Curtailment', "GWh", GWH_TO_MWH),
+        (cost, 'Capex and Opex', "bn€/a", BN_EUR_TO_EUR)
+    ]
 
     # Loop over the plots and create and plot each one
-    for data, title in plots:
-        plot = data.hvplot.bar(title=title, stacked=True,
-                               height=400, width=600).opts(active_tools=['pan'])
+    for data, title, unit, scale in plots:
+        plot = data.droplevel(0).groupby(nice_names).sum().div(scale).hvplot.bar(
+            title=title, stacked=True, xlabel="Technology", color=colors, ylabel=unit, height=400, width=600).opts(active_tools=['pan'])
 
         st.bokeh_chart(hv.render(plot, backend='bokeh'),
                        use_container_width=True)

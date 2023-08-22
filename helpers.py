@@ -1,3 +1,5 @@
+import pandas as pd
+
 
 def rename_techs(label):
 
@@ -106,41 +108,12 @@ def rename_techs_tyndp(tech):
 
 
 def prepare_colors(config):
-
-    colors = config["tech_colors"]
-
-    colors["electricity grid"] = colors["electricity"]
-    colors["ground-sourced ambient"] = colors["ground heat pump"]
-    colors["air-sourced ambient"] = colors["air heat pump"]
-    colors["co2 atmosphere"] = colors["co2"]
-    colors["co2 stored"] = colors["co2"]
-    colors["net co2 emissions"] = colors["co2"]
-    colors["co2 sequestration"] = colors["co2"]
-    colors["fossil oil"] = colors["oil"]
-    colors["fossil gas"] = colors["gas"]
-    colors["biogas to gas"] = colors["biogas"]
-    colors["process emissions from feedstocks"] = colors["process emissions"]
-
-    gas_boilers = ['residential rural gas boiler', 'services rural gas boiler',
-                   'residential urban decentral gas boiler',
-                   'services urban decentral gas boiler', 'urban central gas boiler']
-    for gas_boiler in gas_boilers:
-        colors[gas_boiler] = colors["gas boiler"]
-
-    colors["urban central gas CHP"] = colors["CHP"]
-    colors["urban central gas CHP CC"] = colors["CHP"]
-    colors["urban central solid biomass CHP"] = colors["CHP"]
-    colors["urban central solid biomass CHP CC"] = colors["CHP"]
-
-    return colors
+    colors = pd.Series(config["tech_colors"])
+    return colors.rename(config["nice_names"])
 
 
 def get_cmap(c):
-    if "heat" in c:
-        return "Reds"
-    elif "import-export" in c:
-        return "PiYG_r"
-    elif "solar" in c:
+    if "solar" in c:
         return "Oranges"
     elif "hydrogen" in c:
         return "Purples"
